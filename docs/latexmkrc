@@ -1,0 +1,11 @@
+# pdfLaTeX, НЕ XeLaTeX. Причината е T2A + tempora, вж. preamble.tex.
+$pdf_mode = 1;
+$bibtex_use = 2;
+$out_dir = 'build';
+$clean_ext = 'bbl nav out snm synctex.gz run.xml';
+
+# latexmk стартира bibtex с работна директория build/. Оттам търсенето по пътя на
+# TeX намира ЧУЖД references.bib от инсталацията на MiKTeX преди този до Main.tex,
+# и списъкът с литература излиза празен, без съобщение за грешка. Затова папката
+# на източника се добавя изрично и застава първа в BIBINPUTS.
+ensure_path('BIBINPUTS', '..');
