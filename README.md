@@ -11,21 +11,30 @@ itself, instead of linking against the vendor client libraries or going through 
 manager. Removing those layers makes the cost of database access visible: every buffer copy,
 every round trip and every serialisation step is code in this repository rather than behaviour
 hidden behind someone else's API. The library provides an asynchronous connection pool, a
-prepared statement cache and a zero copy row decoder, and it is to be measured against `libpq`
-and `libmysqlclient` on the same workload. No measurement has been taken yet.
+prepared statement cache and a zero copy row decoder, and it carries a message trace that reports
+exactly which protocol messages a query cost.
 
-## Goals
+**No mandatory third-party dependencies.** A C++20 compiler and CMake are enough. Nothing is
+fetched at configure time. The test runner, the timing harness and the hash functions the two
+authentication exchanges need are all in this repository.
 
-- Implement the PostgreSQL frontend/backend protocol from its specification, covering the simple
-  and the extended query cycles.
-- Implement the MySQL client/server protocol from its specification, covering handshake, text
-  and binary result sets.
-- Decode result rows without copying out of the receive buffer, with the lifetime rule stated in
-  the public contract.
-- Provide an asynchronous connection pool built on C++20 coroutines, with no thread per connection.
-- Cache prepared statements per connection and measure the effect on round trip count.
-- Compare latency, throughput, memory and round trips against `libpq` and `libmysqlclient` on one
-  identical workload.
+## What is implemented
+
+| Area | State |
+|---|---|
+| PostgreSQL protocol 3.0: startup, simple query flow | done |
+| PostgreSQL extended flow: Parse, Bind, Describe, Execute, Sync, Close | done |
+| PostgreSQL authentication: trust, cleartext, MD5, SCRAM-SHA-256 | done |
+| PostgreSQL type decoding, text and binary | int2/4/8, float4/8, bool, text, bytea, timestamp, numeric, 1-D arrays |
+| MySQL protocol: HandshakeV10, `mysql_native_password`, auth switch | done |
+| MySQL text protocol query flow, `COM_QUERY`, `COM_PING`, `COM_QUIT` | done |
+| C++20 coroutine layer: `task<T>`, event loop, awaitable socket, timers | done |
+| Connection pool: bounded, acquire with timeout, health check, direct handoff | done |
+| Prepared statement cache: per connection, LRU, close on eviction, retry on 26000 | done |
+| Typed row mapping with compile time field binding | done |
+| Protocol message trace and round trip counting | done |
+| Integration tests against real servers via Docker Compose | done, 12 cases |
+| TLS, `COPY`, `LISTEN`/`NOTIFY`, MySQL binary prepared statements, `caching_sha2_password` | out of scope, reported with a clear error |
 
 ## Technologies
 
@@ -33,31 +42,35 @@ and `libmysqlclient` on the same workload. No measurement has been taken yet.
 |---|---|---|
 | C++20 | ISO/IEC 14882:2020 | Coroutines carry the async model, concepts express the shared codec contract without virtual dispatch |
 | `std::span`, `std::string_view` | C++20 standard library | The carriers for zero copy row decoding, no extra dependency needed |
-| CMake | 3.25 or newer | Standard build system for C++ libraries, needed for the multi target layout |
-| GoogleTest | 1.14 or newer | Unit and integration tests, widely available and already known |
+| CMake | 3.20 or newer | Standard build system for C++ libraries, needed for the multi target layout |
 | PostgreSQL wire protocol | Version 3.0 | The protocol implemented directly, publicly specified |
 | MySQL client/server protocol | `Protocol::HandshakeV10` | The second protocol implemented directly, publicly specified |
 | Docker Compose | v2 | Pins server versions so integration tests and measurements are reproducible |
-| `libpq`, `libmysqlclient` | System packages | Baselines for the comparison, never a runtime dependency of the library |
+| `libpq` | optional, system package | Baseline for the benchmark only. Found with `find_package(... QUIET)`; the benchmark reports its absence and measures nothing rather than guessing |
+
+The test runner is `tests/check.hpp`, about 150 lines, registered with CTest through `add_test`.
+There is no GoogleTest and no Google Benchmark: a build that needs a package manager is a build
+nobody runs.
 
 ## Architecture
 
 Five layers with one directional dependency. The transport owns the socket and the buffers and
 knows nothing about message content. Above it sit two independent protocol codecs, one per
-database, sharing no base class but satisfying the same concept. The row decoder turns a message
-body into views into the receive buffer. The connection pool owns connection lifetime and the
-per connection prepared statement cache. The typed mapping layer binds protocol values to C++
-types, checked at compile time.
+database, sharing no base class but satisfying the same concept (`conduit::frame_codec`, checked
+with a `static_assert` in each). The row decoder turns a message body into views into the receive
+buffer. The connection pool owns connection lifetime, and each connection owns its prepared
+statement cache. The typed mapping layer binds protocol values to C++ types, checked at compile
+time.
 
 ```mermaid
 flowchart TD
     App[Application code] --> Map[Typed mapping layer]
-    Map --> Pool[Async connection pool<br/>prepared statement cache]
-    Pool --> PG[PostgreSQL codec]
+    Map --> Pool[Async connection pool]
+    Pool --> PG[PostgreSQL codec<br/>+ statement cache]
     Pool --> MY[MySQL codec]
     PG --> Dec[Zero copy row decoder]
     MY --> Dec
-    PG --> Tr[Transport<br/>socket and buffers]
+    PG --> Tr[Transport<br/>socket, buffers, event loop]
     MY --> Tr
     Dec -. views into .-> Tr
     Tr --> Net[(Database server)]
@@ -65,20 +78,85 @@ flowchart TD
 
 ## Build
 
+Verified on Windows 11 with g++ 15.2.0 (MinGW-w64), CMake 4.3.2 and Ninja 1.13.2.
+
 ```bash
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build -j
-
-# unit tests only, no server required
-ctest --test-dir build -L unit
-
-# integration tests, requires the compose environment to be up
-docker compose up -d
-ctest --test-dir build -L integration
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build
 ```
 
-The build files and the compose environment land in the next pass. This repository currently
-holds the scaffold and the documentation.
+`-G Ninja` is a preference, not a requirement; the default generator works too.
+
+## Test
+
+```bash
+# 85 unit cases, no server needed
+ctest --test-dir build -L unit
+
+# 12 integration cases against real servers
+docker compose up -d
+ctest --test-dir build -L integration
+
+# everything; the integration binary skips and still exits zero when no server is up
+ctest --test-dir build --output-on-failure
+```
+
+## Run the demo
+
+One command, both backends. It connects, creates a table, inserts rows, runs a parameterised
+query through the extended protocol, prints the decoded typed results, and prints the protocol
+message trace for every step.
+
+```bash
+docker compose up -d
+cmake --build build --target demo
+```
+
+Or run the binary directly: `./build/examples/conduit_demo`. An excerpt of what it prints:
+
+```
+  extended query, first execution (Parse, Describe, Bind, Execute, Sync), binary results:
+    -> Parse  (101 B)  conduit_s1: SELECT id, sensor, reading, valid FROM ...
+    -> Describe  (17 B)  statement conduit_s1
+    -> Bind  (37 B)  1 parameters, binary results
+    -> Execute  (10 B)  unlimited rows
+    -> Sync  (5 B)
+    <- ParseComplete  (5 B)
+    <- ParameterDescription  (11 B)  1 parameters
+    <- RowDescription  (103 B)  4 columns
+    <- BindComplete  (5 B)
+    <- DataRow  (45 B)
+    <- CommandComplete  (14 B)  SELECT 2
+    <- ReadyForQuery  (6 B)  I
+    round trips: 1
+
+  same SQL again: the statement cache skips Parse and Describe
+    -> Bind  (38 B)  1 parameters, binary results
+    -> Execute  (10 B)  unlimited rows
+    -> Sync  (5 B)
+    ...
+```
+
+Connection details default to the ports in `docker-compose.yml` and can be overridden with
+`CONDUIT_PG_HOST`, `CONDUIT_PG_PORT`, `CONDUIT_PG_USER`, `CONDUIT_PG_PASSWORD`,
+`CONDUIT_PG_DATABASE` and the matching `CONDUIT_MYSQL_*` variables.
+
+## Measure
+
+```bash
+docker compose up -d
+cmake --build build --target bench
+# or, with the raw per repetition samples written to benchmarks/results/raw_samples.csv
+./build/benchmarks/conduit_bench --raw --rows=5000
+```
+
+The benchmark measures simple against extended query flow, the effect of the statement cache on
+both wall time and message count, pool acquisition latency across pool size and concurrency, and
+text against binary decode throughput. It compares against `libpq` when `libpq` is installed, and
+says so explicitly when it is not.
+
+Every number in the report was produced by this program on the machine described in the report;
+nothing is estimated.
 
 ## Documentation
 
@@ -92,6 +170,9 @@ cd docs
 latexmk -pdf Main.tex   # output lands in docs/build/Main.pdf
 ```
 
+`latexmk` exits zero even when the bibliography silently fails, so check `docs/build/Main.blg`
+for the line `You've used N entries` and compare N against `references.bib`.
+
 Unfilled facts are marked with `\TODO{...}` and can be listed with:
 
 ```bash
@@ -101,24 +182,25 @@ grep -rn 'TODO' docs/chapters docs/Main.tex docs/references.bib
 ## Status
 
 - [x] Repository scaffold
-- [x] Report skeleton in `docs/`, all nine chapter files present
+- [x] Report in `docs/`, all nine chapter files written
 - [x] Bibliography with verifiable sources
-- [ ] CMake build
-- [ ] Transport layer
-- [ ] PostgreSQL codec
-- [ ] MySQL codec
-- [ ] Zero copy row decoder
-- [ ] Async connection pool
-- [ ] Prepared statement cache
-- [ ] Typed mapping layer
-- [ ] Docker Compose environment
-- [ ] Unit tests
-- [ ] Integration tests against both servers
-- [ ] Benchmark harness
-- [ ] Measurements against `libpq` and `libmysqlclient`
-- [ ] Results chapter filled in
-
-Nothing in the results chapter is measured yet. Every number there is a `\TODO` marker on purpose.
+- [x] CMake build, no mandatory dependencies
+- [x] Transport layer and C++20 coroutine event loop
+- [x] PostgreSQL codec, both query flows, four authentication methods
+- [x] MySQL codec, handshake and text protocol
+- [x] Zero copy row decoder, text and binary
+- [x] Async connection pool with timeout, health check and direct handoff
+- [x] Prepared statement cache with eviction and invalidation
+- [x] Typed mapping layer with compile time field binding
+- [x] Docker Compose environment, PostgreSQL 16.4 and MySQL 8.0.39
+- [x] Unit tests, 85 cases
+- [x] Integration tests against both servers, 12 cases
+- [x] Benchmark harness
+- [x] Results chapter filled in with measured numbers
+- [ ] Comparison against `libpq` and `libmysqlclient`: not measured, neither library is installed
+      on the machine used. The benchmark has the code path and reports the absence.
+- [ ] Peak memory measurement: not implemented, so no memory column appears in any table
+- [ ] TLS
 
 ## License
 
