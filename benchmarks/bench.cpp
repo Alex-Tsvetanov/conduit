@@ -148,6 +148,9 @@ struct pg_results {
     std::size_t simple_msgs = 0;
     std::size_t extended_first_msgs = 0;
     std::size_t extended_cached_msgs = 0;
+    std::size_t simple_trips = 0;
+    std::size_t extended_first_trips = 0;
+    std::size_t extended_cached_trips = 0;
     std::size_t large_rows = 0;
     double decode_text_us = 0;
     double decode_binary_us = 0;
@@ -156,7 +159,15 @@ struct pg_results {
 task<pg_results> measure_pg(event_loop& loop, int large_rows) {
     pg_results out;
     pg::connection c{loop};
-    co_await c.open(pg_params());
+    // The cold cache loop below runs a different SQL text on every repetition. With
+    // the default cache of 32 entries the cache saturates after 32 of them, and every
+    // later repetition then also pays an eviction: an extra Close, a second flush and
+    // a second wait for the server. That is a real cost, but it is not the cost of a
+    // cache miss, and folding the two into one number labelled "cold cache" measures
+    // the wrong thing. The cache is sized so that no eviction happens instead.
+    auto params = pg_params();
+    params.statement_cache_size = static_cast<std::size_t>(warmup + reps + 16);
+    co_await c.open(params);
     co_await pg_setup(c, large_rows);
 
     // --- one row, simple query flow -----------------------------------------
@@ -209,16 +220,19 @@ task<pg_results> measure_pg(event_loop& loop, int large_rows) {
         c.trace().clear();
         co_await c.simple_query("SELECT id, label FROM conduit_bench WHERE id = 1");
         out.simple_msgs = c.trace().entries().size();
+        out.simple_trips = c.trace().round_trips();
 
         c.trace().clear();
         co_await c.execute("SELECT id, label FROM conduit_bench WHERE id = $1 /*counted*/",
                            pg::params(1), wire_format::binary);
         out.extended_first_msgs = c.trace().entries().size();
+        out.extended_first_trips = c.trace().round_trips();
 
         c.trace().clear();
         co_await c.execute("SELECT id, label FROM conduit_bench WHERE id = $1 /*counted*/",
                            pg::params(1), wire_format::binary);
         out.extended_cached_msgs = c.trace().entries().size();
+        out.extended_cached_trips = c.trace().round_trips();
         c.trace().enable(false);
         c.trace().clear();
     }
@@ -444,10 +458,14 @@ int main(int argc, char** argv) {
         row("extended flow, binary results", pg.large_binary,
             "decode " + std::to_string(static_cast<long long>(pg.decode_binary_us)) + " us/result");
 
-        std::cout << "\nProtocol messages exchanged for one logical query\n";
-        std::cout << "  simple query flow                     " << pg.simple_msgs << "\n";
-        std::cout << "  extended flow, first execution        " << pg.extended_first_msgs << "\n";
-        std::cout << "  extended flow, statement cached       " << pg.extended_cached_msgs << "\n";
+        std::cout << "\nProtocol messages and round trips for one logical query\n";
+        std::cout << "  case                                  messages  round trips\n";
+        std::cout << "  simple query flow                     " << std::setw(8) << pg.simple_msgs
+                  << std::setw(13) << pg.simple_trips << "\n";
+        std::cout << "  extended flow, first execution        " << std::setw(8)
+                  << pg.extended_first_msgs << std::setw(13) << pg.extended_first_trips << "\n";
+        std::cout << "  extended flow, statement cached       " << std::setw(8)
+                  << pg.extended_cached_msgs << std::setw(13) << pg.extended_cached_trips << "\n";
     } catch (const std::exception& e) {
         std::cout << "\nPostgreSQL measurements failed: " << e.what() << "\n";
         std::cout << "is the compose environment up?  docker compose up -d\n";

@@ -48,7 +48,7 @@ authentication exchanges need are all in this repository.
 | Docker Compose | v2 | Pins server versions so integration tests and measurements are reproducible |
 | `libpq` | optional, system package | Baseline for the benchmark only. Found with `find_package(... QUIET)`; the benchmark reports its absence and measures nothing rather than guessing |
 
-The test runner is `tests/check.hpp`, about 150 lines, registered with CTest through `add_test`.
+The test runner is `tests/check.hpp`, 170 lines, registered with CTest through `add_test`.
 There is no GoogleTest and no Google Benchmark: a build that needs a package manager is a build
 nobody runs.
 

@@ -87,11 +87,11 @@ INSERT INTO conduit_items VALUES
 
 \begin{lstlisting}[language={},caption={Начало на файла със суровите проби},label={lst:raw}]
 case,repetition,microseconds
-pg_simple_one_row,0,3075.500
-pg_simple_one_row,1,1468.600
-pg_simple_one_row,2,1063.400
-pg_simple_one_row,3,983.700
-pg_simple_one_row,4,2477.800
+pg_simple_one_row,0,592.200
+pg_simple_one_row,1,588.500
+pg_simple_one_row,2,621.400
+pg_simple_one_row,3,599.900
+pg_simple_one_row,4,649.500
 ...
 \end{lstlisting}
 
@@ -108,22 +108,23 @@ Conduit measurements
   repetitions 500, warm up repetitions 20 (discarded), large result 5000 rows
 
 PostgreSQL, one row              median      p95     mean   stddev     n
-  simple query flow              2114.0   8148.6   3197.3   3589.3   500
-  extended flow, first execution 3839.7  15950.3   5711.3   5589.4   500
-  extended flow, cached          1656.5   5043.1   2177.6   1578.7   500
+  simple query flow               611.9    700.0    624.6     39.1   500
+  extended flow, first execution  635.7    732.8    650.8     44.7   500
+  extended flow, cached           605.0    759.5    628.9     84.7   500
 
 PostgreSQL, 5000 rows
-  text results                  11262.7  27935.1  14305.9   9333.8   100
-  binary results                 7103.8  17071.8   8909.9   4673.8   100
+  text results                   3637.6   4478.8   3816.9    584.7   100
+  binary results                 3114.9   5116.8   3332.9    714.5   100
 
-Protocol messages per logical query
-  simple query flow                    5
-  extended flow, first execution      15
-  extended flow, statement cached      7
+Protocol messages and round trips per logical query
+  case                                  messages  round trips
+  simple query flow                            5            1
+  extended flow, first execution              12            1
+  extended flow, statement cached              7            1
 
 MySQL
-  text protocol, one row          937.7  10308.5   2743.9   4667.5   500
-  text protocol, 5000 rows       9408.6  22370.4  13309.8  11396.7   100
+  text protocol, one row          642.6    725.0    650.1     41.3   500
+  text protocol, 5000 rows       5585.1   5990.5   5647.3    303.6   100
 
 libpq baseline: not built, libpq was not found on this machine
 \end{lstlisting}
