@@ -89,6 +89,14 @@ public:
 
     std::coroutine_handle<promise_type> handle() const noexcept { return h_; }
 
+    // The value of a task that has already run to completion, with the same
+    // semantics as awaiting it. Needed by an awaiter that decides for itself
+    // whether to suspend, so it can hand the result back from await_resume.
+    T take() {
+        if (h_.promise().error) std::rethrow_exception(h_.promise().error);
+        return std::move(*h_.promise().value);
+    }
+
 private:
     std::coroutine_handle<promise_type> h_{};
 };

@@ -146,7 +146,42 @@ public:
 
 private:
     task<void> authenticate(const connect_params& p);
-    task<frame> read_message();
+    // Reading one backend message.
+    //
+    // The common case by a wide margin is that a whole message is already in the
+    // receive buffer: one socket read carries many messages, and a result set of
+    // N rows arrives in far fewer than N reads. That case must not cost a
+    // coroutine. It used to: read_message() was a coroutine, so every message
+    // built a frame, and the resumption chain grew the stack once per message
+    // rather than unwinding it. On a 5000 row result that exhausts the stack.
+    //
+    // So await_ready does the peek and answers true when the message is already
+    // there, which suspends nothing and allocates nothing. Only when the buffer
+    // is short does it fall through to the coroutine, and that happens once per
+    // socket read, not once per message.
+    struct message_awaitable {
+        connection* self;
+        std::optional<frame> ready{};
+        task<frame> slow{};
+
+        bool await_ready() {
+            ready = peek_frame(self->buf_.readable());
+            return ready.has_value();
+        }
+        std::coroutine_handle<> await_suspend(std::coroutine_handle<> caller) {
+            slow = self->read_message_slow();
+            auto h = slow.handle();
+            h.promise().continuation = caller;
+            return h;
+        }
+        frame await_resume() {
+            if (ready) return *ready;
+            return slow.take();
+        }
+    };
+
+    message_awaitable read_message() { return message_awaitable{this}; }
+    task<frame> read_message_slow();
     void consume(const frame& f) { buf_.consume(f.consumed); }
     task<void> flush();
     task<query_result> run_extended(std::string_view sql, const param_list& values,

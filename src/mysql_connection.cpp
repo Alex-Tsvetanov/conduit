@@ -4,7 +4,9 @@
 
 namespace conduit::mysql {
 
-task<packet> connection::read_packet() {
+// The slow half of read_packet, reached only when the buffer does not yet hold
+// a whole packet. See packet_awaitable in the header.
+task<packet> connection::read_packet_slow() {
     for (;;) {
         auto p = peek_packet(buf_.readable());
         if (p) co_return *p;

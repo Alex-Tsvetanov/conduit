@@ -15,17 +15,18 @@
 \toprule
 \textbf{Път} & \textbf{Какво съдържа} & \textbf{Редове} \\
 \midrule
-\code{bytes.hpp}, \code{task.hpp}, \code{net.*} & буфери, \code{task<T>}, сокет и цикъл на събитията & 1139 \\
+\code{bytes.hpp}, \code{task.hpp}, \code{net.*} & буфери, \code{task<T>}, сокет и цикъл на събитията & 1147 \\
 \code{crypto.*}, \code{scram.*} & MD5, SHA-1, SHA-256, HMAC, PBKDF2, SCRAM-SHA-256 & 470 \\
 \code{codec.hpp}, \code{value.*}, \code{trace.*} & договорът между кодеците, декодерите, броене на съобщенията & 612 \\
-\code{lru\_cache.hpp}, \code{row\_map.hpp}, \code{pool.hpp} & кеш с изместване, типово изображение, асинхронен пул & 484 \\
-\code{pg/}, \code{src/pg\_*.cpp} & кодек и връзка за PostgreSQL, двата цикъла & 1083 \\
-\code{mysql/}, \code{src/mysql\_*.cpp} & кодек и връзка за MySQL, текстов протокол & 779 \\
+\code{lru\_cache.hpp}, \code{row\_map.hpp}, \code{pool.hpp} & кеш с изместване, типово изображение, асинхронен пул & 496 \\
+\code{pg/}, \code{src/pg\_*.cpp} & кодек и връзка за PostgreSQL, двата цикъла & 1121 \\
+\code{mysql/}, \code{src/mysql\_*.cpp} & кодек и връзка за MySQL, текстов протокол & 809 \\
 \midrule
 \code{tests/} & 85 модулни и 12 интеграционни случая, собствена рамка & 2117 \\
-\code{benchmarks/bench.cpp} & измервателната програма, флаг \code{--raw} & 516 \\
+\code{benchmarks/bench.cpp} & измервателната програма, флаг \code{--raw} & 613 \\
+\code{benchmarks/symmetric\_transfer\_check.cpp} & проверка дали симетричният трансфер расте по стек & 85 \\
 \code{examples/demo.cpp} & показна програма с отпечатан протоколен обмен & 286 \\
-\code{docker-compose.yml} & PostgreSQL 16.4 и MySQL 8.0.39, фиксирани версии & 48 \\
+\code{docker-compose.yml} & PostgreSQL 16.4 и MySQL 8.0.39, фиксирани версии & 78 \\
 \bottomrule
 \end{tabular}
 \end{table}

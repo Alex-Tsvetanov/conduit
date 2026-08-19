@@ -13,7 +13,10 @@ void trace_in(message_trace& t, const frame& f, std::string detail = {}) {
 
 }  // namespace
 
-task<frame> connection::read_message() {
+// The slow half of read_message: only reached when the receive buffer does not
+// yet hold a whole message. See message_awaitable in the header for why the
+// fast half is not a coroutine.
+task<frame> connection::read_message_slow() {
     for (;;) {
         auto f = peek_frame(buf_.readable());
         if (f) co_return *f;

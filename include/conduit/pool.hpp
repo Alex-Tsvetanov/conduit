@@ -200,10 +200,22 @@ private:
             w->co = h;
             pool->waiters_.push_back(w);
             auto* loop = pool->loop_;
-            auto shared = w;
             auto* p = pool;
-            loop->call_at(deadline, [loop, shared, p]() {
-                if (shared->settled) return;
+            // Weak, not strong, and the difference is a defect ASan found.
+            //
+            // Nothing cancels this callback when the slot is granted normally,
+            // so it stays in the loop until its deadline and can run long after
+            // the waiter it refers to is gone: the pool drops its reference in
+            // hand_off, and the awaiting coroutine drops the last one when it
+            // finishes. A captured shared_ptr looks like it prevents that and
+            // does not, because the copy is not the thing being kept alive by
+            // the time the callback fires. Holding it weakly says what is
+            // actually true: if the waiter is still waiting it is alive and
+            // reachable, and if it is not, this callback has nothing to do.
+            std::weak_ptr<waiter> weak = w;
+            loop->call_at(deadline, [loop, weak, p]() {
+                auto shared = weak.lock();
+                if (!shared || shared->settled) return;
                 shared->settled = true;
                 shared->timed_out = true;
                 p->forget_waiter(shared);

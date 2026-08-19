@@ -80,7 +80,35 @@ public:
     event_loop& loop() noexcept { return *loop_; }
 
 private:
-    task<packet> read_packet();
+    // Same shape and same reason as pg::connection::message_awaitable: a whole
+    // packet is usually already in the buffer, and paying a coroutine for that
+    // case grew the stack once per packet instead of unwinding it, which a large
+    // result set turns into a crash. The peek happens in await_ready, so the
+    // common case suspends nothing; the coroutine is reached only when the
+    // buffer is short, which is once per socket read.
+    struct packet_awaitable {
+        connection* self;
+        std::optional<packet> ready{};
+        task<packet> slow{};
+
+        bool await_ready() {
+            ready = peek_packet(self->buf_.readable());
+            return ready.has_value();
+        }
+        std::coroutine_handle<> await_suspend(std::coroutine_handle<> caller) {
+            slow = self->read_packet_slow();
+            auto h = slow.handle();
+            h.promise().continuation = caller;
+            return h;
+        }
+        packet await_resume() {
+            if (ready) return *ready;
+            return slow.take();
+        }
+    };
+
+    packet_awaitable read_packet() { return packet_awaitable{this}; }
+    task<packet> read_packet_slow();
     void consume(const packet& p) { buf_.consume(p.consumed); }
     task<void> send(std::uint8_t sequence, byte_span payload, const char* name,
                     std::string detail = {});

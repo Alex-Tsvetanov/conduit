@@ -28,3 +28,11 @@ add_custom_target(bench
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
     USES_TERMINAL
     COMMENT "Running the Conduit measurements against the compose environment")
+
+# A standalone check, not part of the measurements. It answers whether symmetric
+# transfer grows the stack on the compiler in use, which is the question that
+# separated a compiler defect from the one in this project. See the file header.
+add_executable(symmetric_transfer_check symmetric_transfer_check.cpp)
+if(NOT MSVC)
+    target_compile_options(symmetric_transfer_check PRIVATE -Wall -Wextra)
+endif()

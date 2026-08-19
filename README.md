@@ -204,11 +204,21 @@ grep -rn 'TODO' docs/chapters docs/Main.tex docs/references.bib
       Those numbers are comparable with each other and **not** with the host tables.
 - [x] Peak memory measurement: implemented. Peak working set on Windows, `VmHWM` on Linux,
       reported for the whole run. 7.7 MiB on the host, 11.7 MiB in the container.
-- [ ] **Known defect, found by this measurement**: built with GCC 12.2 the benchmark dies with
-      SIGSEGV before its first line. The backtrace alternates `read_message` and `run_extended`,
-      which grows the stack instead of unwinding it. GCC 14.2 runs the same source cleanly, so
-      the code is relying on the resumption chain being turned into a jump, which is an
-      optimisation and not a guarantee. Not fixed in this version.
+- [x] **Two defects, both found by this measurement, both fixed.**
+      1. `read_message()` (PostgreSQL) and `read_packet()` (MySQL) were coroutines invoked once
+         per protocol message, including the common case where a whole message was already in the
+         receive buffer. The resumption chain grew the stack once per message instead of unwinding
+         it, so a 5000 row result exhausted it. GCC 12.2 died with SIGSEGV; GCC 14.2 tolerated the
+         same source. A compiler bug was ruled out by measurement: `benchmarks/symmetric_transfer_check.cpp`
+         does 200,000 symmetric transfers at `-O2` on GCC 12.2 without growing the stack. Both are
+         now awaitables whose `await_ready()` does the peek, so the common case suspends nothing
+         and allocates nothing. The coroutine survives as `*_slow()`, entered once per socket read.
+      2. The pool's acquire-timeout callback captured the waiter by `shared_ptr`. Nothing cancels
+         that callback when a slot is granted normally, so it outlived the waiter and AddressSanitizer
+         reported a heap-use-after-free. It now holds a `weak_ptr` and locks it.
+      Verified: GCC 12.2 Release completes where it used to crash, GCC 14.2 completes, the host
+      MinGW build completes with `ctest` 2 of 2 green, and ASan reports no error (it needs a 128 MB
+      stack to finish, because the sanitizer's own frame instrumentation overflows the default 8 MB).
 - [ ] TLS
 
 ## License
