@@ -197,9 +197,18 @@ grep -rn 'TODO' docs/chapters docs/Main.tex docs/references.bib
 - [x] Integration tests against both servers, 12 cases
 - [x] Benchmark harness
 - [x] Results chapter filled in with measured numbers
-- [ ] Comparison against `libpq` and `libmysqlclient`: not measured, neither library is installed
-      on the machine used. The benchmark has the code path and reports the absence.
-- [ ] Peak memory measurement: not implemented, so no memory column appears in any table
+- [x] Comparison against `libpq` and `libmysqlclient`: measured. Not on the Windows machine the
+      rest of the report was measured on, where neither library is installed, but in a Debian
+      container built by `Dockerfile.bench`, where conduit and both vendor libraries run in the
+      same process against the same servers. Reproduce with `docker compose run --rm --build bench`.
+      Those numbers are comparable with each other and **not** with the host tables.
+- [x] Peak memory measurement: implemented. Peak working set on Windows, `VmHWM` on Linux,
+      reported for the whole run. 7.7 MiB on the host, 11.7 MiB in the container.
+- [ ] **Known defect, found by this measurement**: built with GCC 12.2 the benchmark dies with
+      SIGSEGV before its first line. The backtrace alternates `read_message` and `run_extended`,
+      which grows the stack instead of unwinding it. GCC 14.2 runs the same source cleanly, so
+      the code is relying on the resumption chain being turned into a jump, which is an
+      optimisation and not a guarantee. Not fixed in this version.
 - [ ] TLS
 
 ## License

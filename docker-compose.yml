@@ -46,3 +46,33 @@ services:
       interval: 3s
       timeout: 3s
       retries: 40
+
+  # The vendor library comparison. Built and run here because neither libpq nor
+  # libmysqlclient is installed on the Windows machine the rest of the report was
+  # measured on. Run it with:
+  #
+  #   docker compose run --rm --build bench
+  #
+  # Its numbers stand on their own and are not mixed with the host measurements.
+  bench:
+    build:
+      context: .
+      dockerfile: Dockerfile.bench
+    container_name: conduit_bench
+    profiles: ["bench"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mysql:
+        condition: service_healthy
+    environment:
+      CONDUIT_PG_HOST: postgres
+      CONDUIT_PG_PORT: "5432"
+      CONDUIT_PG_USER: conduit
+      CONDUIT_PG_PASSWORD: conduit
+      CONDUIT_PG_DATABASE: conduit
+      CONDUIT_MYSQL_HOST: mysql
+      CONDUIT_MYSQL_PORT: "3306"
+      CONDUIT_MYSQL_USER: conduit
+      CONDUIT_MYSQL_PASSWORD: conduit
+      CONDUIT_MYSQL_DATABASE: conduit

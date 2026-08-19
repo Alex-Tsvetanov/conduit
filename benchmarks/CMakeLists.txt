@@ -11,6 +11,17 @@ if(PostgreSQL_FOUND)
     target_compile_definitions(conduit_bench PRIVATE CONDUIT_HAVE_LIBPQ=1)
 endif()
 
+if(CONDUIT_MYSQLCLIENT_FOUND)
+    target_include_directories(conduit_bench PRIVATE ${MYSQLCLIENT_INCLUDE_DIR})
+    target_link_libraries(conduit_bench PRIVATE ${MYSQLCLIENT_LIBRARY})
+    target_compile_definitions(conduit_bench PRIVATE CONDUIT_HAVE_MYSQLCLIENT=1)
+endif()
+
+# GetProcessMemoryInfo, used for the peak resident set on Windows.
+if(WIN32)
+    target_link_libraries(conduit_bench PRIVATE psapi)
+endif()
+
 add_custom_target(bench
     COMMAND conduit_bench
     DEPENDS conduit_bench

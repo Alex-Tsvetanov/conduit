@@ -19,6 +19,7 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -28,6 +29,20 @@
 
 #ifdef CONDUIT_HAVE_LIBPQ
 #  include <libpq-fe.h>
+#endif
+
+#ifdef CONDUIT_HAVE_MYSQLCLIENT
+#  include <mysql.h>
+#endif
+
+// Peak resident memory. Reported because a client library that is fast because
+// it buffers the whole result set is not the same trade as one that is not, and
+// a latency table alone cannot tell the two apart.
+#ifdef _WIN32
+#  include <windows.h>
+#  include <psapi.h>
+#else
+#  include <cstdio>
 #endif
 
 using namespace conduit;
@@ -413,6 +428,63 @@ summary measure_libpq() {
 }
 #endif
 
+#ifdef CONDUIT_HAVE_MYSQLCLIENT
+// The same shape of measurement as measure_libpq, against the vendor MySQL
+// client. One row, the same table, the same server, so the only difference
+// between this row and the conduit MySQL row is the client implementation.
+summary measure_libmysqlclient() {
+    auto p = mysql_params();
+    MYSQL* conn = mysql_init(nullptr);
+    if (!conn) {
+        std::cout << "  libmysqlclient baseline unavailable: mysql_init failed\n";
+        return {};
+    }
+    if (!mysql_real_connect(conn, p.host.c_str(), p.user.c_str(), p.password.c_str(),
+                            p.database.c_str(), p.port, nullptr, 0)) {
+        std::cout << "  libmysqlclient baseline unavailable: " << mysql_error(conn) << "\n";
+        mysql_close(conn);
+        return {};
+    }
+    std::vector<double> samples;
+    for (int i = 0; i < warmup + reps; ++i) {
+        auto t0 = clock_type::now();
+        if (mysql_query(conn, "SELECT id, label FROM conduit_bench WHERE id = 1") == 0) {
+            MYSQL_RES* r = mysql_store_result(conn);
+            if (r) mysql_free_result(r);
+        }
+        auto dt = std::chrono::duration<double, std::micro>(clock_type::now() - t0).count();
+        if (i >= warmup) samples.push_back(dt);
+    }
+    mysql_close(conn);
+    keep("libmysqlclient_simple_one_row", samples);
+    return summarise(samples);
+}
+#endif
+
+// Peak resident set size in kibibytes, or 0 when the platform does not report
+// it. Windows reports the peak working set, Linux reports VmHWM. The two are
+// defined the same way: the high water mark of pages resident for this process.
+std::size_t peak_rss_kib() {
+#ifdef _WIN32
+    PROCESS_MEMORY_COUNTERS pmc{};
+    if (GetProcessMemoryInfo(GetCurrentProcess(), &pmc, sizeof(pmc)))
+        return static_cast<std::size_t>(pmc.PeakWorkingSetSize / 1024);
+    return 0;
+#else
+    std::ifstream st("/proc/self/status");
+    std::string key;
+    while (st >> key) {
+        if (key == "VmHWM:") {
+            std::size_t kib = 0;
+            st >> kib;
+            return kib;
+        }
+        st.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+    }
+    return 0;
+#endif
+}
+
 void write_raw() {
     std::filesystem::create_directories("benchmarks/results");
     std::ofstream f("benchmarks/results/raw_samples.csv");
@@ -509,6 +581,31 @@ int main(int argc, char** argv) {
     std::cout << "\nlibpq baseline: not built. libpq was not found on this machine at configure\n"
               << "time, so no vendor library comparison was measured and none is reported.\n";
 #endif
+
+#ifdef CONDUIT_HAVE_MYSQLCLIENT
+    try {
+        header("libmysqlclient baseline, same query, same server");
+        row("libmysqlclient query, one row", measure_libmysqlclient());
+    } catch (const std::exception& e) {
+        std::cout << "libmysqlclient baseline failed: " << e.what() << "\n";
+    }
+#else
+    std::cout << "\nlibmysqlclient baseline: not built. The MySQL client library was not found\n"
+              << "on this machine at configure time, so no comparison was measured.\n";
+#endif
+
+    // Printed last on purpose: it is the high water mark for the whole run, so
+    // it covers every case above rather than any one of them.
+    if (std::size_t kib = peak_rss_kib(); kib > 0) {
+        std::cout << "\nPeak resident memory for the whole run\n";
+        std::cout << "  peak resident set  " << std::fixed << std::setprecision(1)
+                  << (static_cast<double>(kib) / 1024.0) << " MiB (" << kib << " KiB)\n";
+        std::cout << "  covers every case above, including the " << large_rows
+                  << " row result and the pool cases\n";
+    } else {
+        std::cout << "\npeak resident memory: not reported by this platform.\n";
+    }
+
 
     if (raw) write_raw();
     std::cout << "\n";

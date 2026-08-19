@@ -1,0 +1,33 @@
+# Build and run the measurement program on Linux, with both vendor client
+# libraries present.
+#
+# It exists because the machine the rest of the report was measured on is
+# Windows with MinGW, and neither libpq nor libmysqlclient is installed there.
+# Rather than install two database client stacks on a workstation to obtain one
+# comparison, the comparison runs here, where the dependency is declared and the
+# whole thing is reproducible from one command.
+#
+# The numbers this container produces are NOT comparable with the numbers in the
+# rest of the report: different operating system, different compiler, and the
+# server is reached over the compose network instead of a published port. They
+# are comparable with each other, which is the entire point: conduit and the two
+# vendor libraries are measured here in the same process on the same run.
+FROM debian:trixie-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        g++ cmake ninja-build \
+        libpq-dev default-libmysqlclient-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /src
+COPY CMakeLists.txt ./
+COPY include ./include
+COPY src ./src
+COPY tests ./tests
+COPY examples ./examples
+COPY benchmarks ./benchmarks
+
+RUN cmake -S . -B build-linux -G Ninja -DCMAKE_BUILD_TYPE=Release \
+    && cmake --build build-linux --target conduit_bench -j
+
+CMD ["./build-linux/benchmarks/conduit_bench"]

@@ -55,6 +55,21 @@ else()
     message(STATUS "conduit: libpq not found, benchmark runs without the libpq baseline")
 endif()
 
+# --- optional baseline: the vendor MySQL client, same rule as libpq ----------
+# Looked for by hand rather than with a find module, because the Debian package
+# installs the headers under a directory the standard modules do not search.
+find_path(MYSQLCLIENT_INCLUDE_DIR mysql.h
+    PATH_SUFFIXES mysql mariadb mysql/mysql)
+find_library(MYSQLCLIENT_LIBRARY NAMES mysqlclient mariadb libmariadb)
+if(MYSQLCLIENT_INCLUDE_DIR AND MYSQLCLIENT_LIBRARY)
+    set(CONDUIT_MYSQLCLIENT_FOUND TRUE)
+    message(STATUS "conduit: MySQL client found at ${MYSQLCLIENT_LIBRARY}, "
+                   "benchmark will include the libmysqlclient baseline")
+else()
+    set(CONDUIT_MYSQLCLIENT_FOUND FALSE)
+    message(STATUS "conduit: MySQL client not found, benchmark runs without that baseline")
+endif()
+
 enable_testing()
 add_subdirectory(tests)
 add_subdirectory(examples)
