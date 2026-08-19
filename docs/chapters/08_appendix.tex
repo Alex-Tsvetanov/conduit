@@ -1,130 +1,37 @@
-% ПРИЛОЖЕНИЯ, без номер.
-% По правилото: изходен текст, формати на структури от данни, екранни форми,
-% получени резултати. Всяко приложение е самостоятелен параграф.
-\section*{ПРИЛОЖЕНИЯ}
+% ПРИЛОЖЕНИЕ, без номер. Само указател към изходния текст, без вмъкване на код.
+\section*{ПРИЛОЖЕНИЕ}
 \label{sec:appendix}
-\addcontentsline{toc}{section}{ПРИЛОЖЕНИЯ}
+\addcontentsline{toc}{section}{ПРИЛОЖЕНИЕ}
 
-\subsection*{Приложение А. Схема на тестовата база}
+Изходният текст не се препечатва тук. Хранилището е публично:
+\url{https://github.com/Alex-Tsvetanov/conduit}. Табл.~\ref{tab:sources} дава указател към
+него; редовете са преброени с \code{wc -l}.
 
-Схемата се създава от самата измервателна програма в началото на всеки пуск, така че
-началното състояние е част от измерването, а не предположение за него. Таблицата се
-пълни с 5000 реда, освен ако не е зададено друго с \code{--rows=N}.
+\begin{table}[H]
+\centering
+\caption{Указател към изходния текст на проекта}
+\label{tab:sources}
+\begin{tabular}{L{4.4cm}L{7.6cm}L{1.6cm}}
+\toprule
+\textbf{Път} & \textbf{Какво съдържа} & \textbf{Редове} \\
+\midrule
+\code{bytes.hpp}, \code{task.hpp}, \code{net.*} & буфери, \code{task<T>}, сокет и цикъл на събитията & 1139 \\
+\code{crypto.*}, \code{scram.*} & MD5, SHA-1, SHA-256, HMAC, PBKDF2, SCRAM-SHA-256 & 470 \\
+\code{codec.hpp}, \code{value.*}, \code{trace.*} & договорът между кодеците, декодерите, броене на съобщенията & 612 \\
+\code{lru\_cache.hpp}, \code{row\_map.hpp}, \code{pool.hpp} & кеш с изместване, типово изображение, асинхронен пул & 484 \\
+\code{pg/}, \code{src/pg\_*.cpp} & кодек и връзка за PostgreSQL, двата цикъла & 1083 \\
+\code{mysql/}, \code{src/mysql\_*.cpp} & кодек и връзка за MySQL, текстов протокол & 779 \\
+\midrule
+\code{tests/} & 85 модулни и 12 интеграционни случая, собствена рамка & 2117 \\
+\code{benchmarks/bench.cpp} & измервателната програма, флаг \code{--raw} & 516 \\
+\code{examples/demo.cpp} & показна програма с отпечатан протоколен обмен & 286 \\
+\code{docker-compose.yml} & PostgreSQL 16.4 и MySQL 8.0.39, фиксирани версии & 48 \\
+\bottomrule
+\end{tabular}
+\end{table}
 
-\begin{lstlisting}[language=SQL,caption={Схема на измервателната таблица, PostgreSQL},label={lst:schema-pg}]
-DROP TABLE IF EXISTS conduit_bench;
-CREATE TABLE conduit_bench (
-    id     bigint primary key,
-    label  text,
-    value  double precision,
-    flag   boolean);
--- 5000 реда, вмъкнати с едно заявление:
--- (1,'label1',1.5,true), (2,'label2',3.0,false), ...
-\end{lstlisting}
-
-\begin{lstlisting}[language=SQL,caption={Схема на измервателната таблица, MySQL},label={lst:schema-my}]
-DROP TABLE IF EXISTS conduit_bench;
-CREATE TABLE conduit_bench (
-    id     bigint primary key,
-    label  varchar(64),
-    value  double,
-    flag   tinyint(1));
-\end{lstlisting}
-
-Показната програма и интеграционните тестове ползват втора таблица с по-широк набор от
-типове, включително \code{numeric}, \code{timestamp} и масив, за да бъде проверено
-декодирането на всеки от тях:
-
-\begin{lstlisting}[language=SQL,caption={Таблица за проверка на декодирането на типовете},label={lst:schema-types}]
-CREATE TABLE conduit_items (
-    id      bigint primary key,
-    label   text,
-    weight  double precision,
-    flag    boolean,
-    amount  numeric(12,3),
-    made_at timestamp,
-    tags    int4[]);
-INSERT INTO conduit_items VALUES
- (1,'alpha',1.5,true, 123456.789,'2024-02-29 13:45:30.123456','{1,2,3}'),
- (2,'beta', 2.5,false,    -0.050,'1999-12-31 23:59:59',       '{}'),
- (3,'gamma',3.5,true,      0.001,'2000-01-01 00:00:00',       NULL);
-\end{lstlisting}
-
-\subsection*{Приложение Б. Конфигурация на средата}
-
-\lstinputlisting[language={},caption={\code{docker-compose.yml}: версиите на сървърите,
-с които са направени измерванията},label={lst:compose}]{../docker-compose.yml}
-
-Портовете са изместени от подразбиращите се, за да не се сблъскат контейнерите с
-евентуално вече инсталиран сървър на същата машина. Удостоверяването при PostgreSQL е
-оставено на подразбиращото се \code{scram-sha-256}, защото клиентът реализира SCRAM и
-отслабването на сървъра би скрило кода, който наистина се изпълнява.
-
-\subsection*{Приложение В. Избрани части от изходния текст}
-
-\lstinputlisting[caption={\code{include/conduit/codec.hpp}: общото между двата кодека,
-изразено като изискване към типа},label={lst:src-codec}]{../include/conduit/codec.hpp}
-
-\lstinputlisting[caption={\code{include/conduit/lru\_cache.hpp}: кешът на подготвените
-заявления; изместеният запис се връща на извикващия, за да бъде затворен на
-сървъра},label={lst:src-lru}]{../include/conduit/lru_cache.hpp}
-
-\lstinputlisting[caption={\code{include/conduit/row\_map.hpp}: типовото изображение със
-свързване на полетата при компилация},label={lst:src-map}]{../include/conduit/row_map.hpp}
-
-Кодекът на съобщенията за PostgreSQL е в \code{src/pg\_message.cpp} и
-\code{include/conduit/pg/protocol.hpp}; кодекът на пакетите за MySQL е в
-\code{src/mysql\_packet.cpp} и \code{include/conduit/mysql/protocol.hpp}; асинхронният
-пул е в \code{include/conduit/pool.hpp}. Ключовите места от всеки от тях са показани в
-Раздел~\ref{sec:implementation}.
-
-\subsection*{Приложение Г. Пълни резултати от измерванията}
-
-Суровите проби от всички повторения се записват от измервателната програма при подаден
-флаг \code{--raw}. Пускът, от който са изведени таблиците в Раздел~\ref{sec:results},
-произведе 5660 записа в \code{benchmarks/results/raw\_samples.csv}. Форматът е един ред
-на повторение:
-
-\begin{lstlisting}[language={},caption={Начало на файла със суровите проби},label={lst:raw}]
-case,repetition,microseconds
-pg_simple_one_row,0,592.200
-pg_simple_one_row,1,588.500
-pg_simple_one_row,2,621.400
-pg_simple_one_row,3,599.900
-pg_simple_one_row,4,649.500
-...
-\end{lstlisting}
-
-Имената на случаите във файла са: \code{pg\_simple\_one\_row},
-\code{pg\_extended\_first\_execution}, \code{pg\_extended\_cached},
-\code{pg\_large\_result\_text}, \code{pg\_large\_result\_binary},
-\code{mysql\_simple\_one\_row}, \code{mysql\_large\_result\_text} и по един
-\code{pool\_acquire\_size$N$\_conc$M$} за всяка от дванадесетте комбинации размер и
-едновременност.
-
-\begin{lstlisting}[language={},caption={Обобщен изход на измервателната програма за
-пуска, от който са таблиците в Раздел~\ref{sec:results}},label={lst:bench-out}]
-Conduit measurements
-  repetitions 500, warm up repetitions 20 (discarded), large result 5000 rows
-
-PostgreSQL, one row              median      p95     mean   stddev     n
-  simple query flow               611.9    700.0    624.6     39.1   500
-  extended flow, first execution  635.7    732.8    650.8     44.7   500
-  extended flow, cached           605.0    759.5    628.9     84.7   500
-
-PostgreSQL, 5000 rows
-  text results                   3637.6   4478.8   3816.9    584.7   100
-  binary results                 3114.9   5116.8   3332.9    714.5   100
-
-Protocol messages and round trips per logical query
-  case                                  messages  round trips
-  simple query flow                            5            1
-  extended flow, first execution              12            1
-  extended flow, statement cached              7            1
-
-MySQL
-  text protocol, one row          642.6    725.0    650.1     41.3   500
-  text protocol, 5000 rows       5585.1   5990.5   5647.3    303.6   100
-
-libpq baseline: not built, libpq was not found on this machine
-\end{lstlisting}
+Схемата на измервателната таблица се създава от самата измервателна програма и е част от
+нейния изходен текст. Суровите проби от всяко повторение се записват при подаден флаг
+\code{--raw} във файла \code{raw\_samples.csv}; пускът, от който са таблиците в
+Раздел~\ref{sec:results}, произведе 5660 записа с полета \code{case}, \code{repetition} и
+\code{microseconds}.
