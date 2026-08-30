@@ -124,6 +124,19 @@ CONDUIT_TEST(handshake_response_layout_matches_the_specification) {
     CHECK(r.empty());
 }
 
+CONDUIT_TEST(ssl_request_is_the_handshake_response_truncated_before_the_user) {
+    std::vector<std::byte> out;
+    std::uint32_t capabilities = caps::protocol_41 | caps::secure_connection | caps::ssl;
+    encode_ssl_request(out, capabilities);
+    CHECK_EQ(out.size(), std::size_t{32});
+    byte_reader r{byte_span(out)};
+    CHECK_EQ(r.le32(), capabilities);
+    CHECK_EQ(r.le32(), static_cast<std::uint32_t>(max_payload));
+    CHECK_EQ(r.u8(), std::uint8_t{45});
+    for (int i = 0; i < 23; ++i) CHECK_EQ(r.u8(), std::uint8_t{0});
+    CHECK(r.empty());
+}
+
 CONDUIT_TEST(packet_classification_separates_ok_err_eof_and_rows) {
     std::vector<std::byte> ok;
     {

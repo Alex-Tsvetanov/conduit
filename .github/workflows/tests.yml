@@ -1,0 +1,87 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  unit:
+    name: unit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build tools and OpenSSL
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build g++ libssl-dev
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+      - name: Build
+        run: cmake --build build
+      - name: Unit tests
+        run: ctest --test-dir build -L unit --output-on-failure
+
+  unit-without-openssl:
+    name: unit without OpenSSL
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build tools without libssl-dev
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build g++
+      - name: Configure
+        run: |
+          set -o pipefail
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release | tee cmake-out.txt
+      - name: Build
+        run: cmake --build build
+      - name: Unit tests
+        run: |
+          set -o pipefail
+          ./build/tests/conduit_tests | tee unit-out.txt
+          if grep -q "TLS will be compiled in" cmake-out.txt; then
+            echo "OpenSSL was found on this runner; the skip path was not exercised."
+            if grep -qE '[1-9][0-9]* failed' unit-out.txt; then exit 1; fi
+            exit 0
+          fi
+          grep -q "OpenSSL not found" cmake-out.txt
+          grep -q "ok   requesting_tls_without_openssl_is_a_clear_error" unit-out.txt
+          grep -q "skip tls_loopback_handshake_transfers_bytes" unit-out.txt
+          grep -q "skip tls_loopback_rejects_an_untrusted_certificate" unit-out.txt
+          grep -q "skip tls_loopback_accepts_a_certificate_when_its_ca_is_given" unit-out.txt
+          if grep -q "^ok   tls_loopback" unit-out.txt; then
+            echo "A TLS loopback test passed on a build without OpenSSL"
+            exit 1
+          fi
+          if grep -qE '[1-9][0-9]* failed' unit-out.txt; then exit 1; fi
+
+  integration:
+    name: integration
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build tools and OpenSSL
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build g++ libssl-dev
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+      - name: Build
+        run: cmake --build build
+      - name: Start database servers
+        run: docker compose up -d --wait --wait-timeout 180
+      - name: Integration tests
+        run: |
+          set -o pipefail
+          ./build/tests/conduit_integration_tests | tee int-out.txt
+          if grep -q "^FAIL " int-out.txt; then
+            exit 1
+          fi
+          if grep -q "skip pg_live_tls_connects_and_runs_a_query" int-out.txt; then
+            echo "PostgreSQL TLS test skipped on a job that started the servers"
+            exit 1
+          fi
+          if grep -q "skip mysql_live_tls_connects_and_runs_a_query" int-out.txt; then
+            echo "MySQL TLS test skipped on a job that started the servers"
+            exit 1
+          fi
+          grep -q "ok   pg_live_tls_connects_and_runs_a_query" int-out.txt
+          grep -q "ok   mysql_live_tls_connects_and_runs_a_query" int-out.txt
+      - name: Stop servers
+        if: always()
+        run: docker compose down -v

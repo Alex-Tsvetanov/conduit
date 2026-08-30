@@ -3,6 +3,7 @@
 
 #include "../check.hpp"
 #include "conduit/pool.hpp"
+#include "conduit/tls.hpp"
 #include "live.hpp"
 
 using namespace conduit;
@@ -160,4 +161,25 @@ CONDUIT_TEST(mysql_live_pool_shares_two_connections_across_six_queries) {
     CHECK_EQ(done, 6);
     CHECK(pool.size() <= 2);
     loop.block_on(pool.close_all());
+}
+
+CONDUIT_TEST(mysql_live_tls_connects_and_runs_a_query) {
+    if (!tls_available()) CONDUIT_SKIP("OpenSSL is not linked");
+    if (!live::mysql_up()) CONDUIT_SKIP("no MySQL server reachable");
+    event_loop loop;
+    mysql::connection c{loop};
+    auto p = live::mysql_params();
+    p.tls.enabled = true;
+    p.tls.verify_peer = false;
+    struct helper {
+        static task<std::string> run(mysql::connection& c, mysql::connect_params p) {
+            co_await c.open(std::move(p));
+            std::string out = c.tls_active() ? "tls" : "plain";
+            auto r = co_await c.query("SELECT 1");
+            out += r.rows == 1 ? "|ok" : "|no-row";
+            co_await c.close();
+            co_return out;
+        }
+    };
+    CHECK_EQ(loop.block_on(helper::run(c, p)), std::string("tls|ok"));
 }

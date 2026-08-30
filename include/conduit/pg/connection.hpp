@@ -17,6 +17,7 @@
 #include "conduit/net.hpp"
 #include "conduit/pg/protocol.hpp"
 #include "conduit/row_map.hpp"
+#include "conduit/tls.hpp"
 #include "conduit/trace.hpp"
 
 namespace conduit::pg {
@@ -42,6 +43,7 @@ struct connect_params {
     // eviction bookkeeping entirely, which is how the benchmark measures what
     // the cache is worth.
     std::size_t statement_cache_size = 32;
+    tls_options tls;
 };
 
 struct query_result {
@@ -142,9 +144,11 @@ public:
 
     std::string parameter(const std::string& name) const;
     std::int32_t backend_pid() const noexcept { return backend_pid_; }
+    bool tls_active() const noexcept { return tls_.active(); }
     event_loop& loop() noexcept { return *loop_; }
 
 private:
+    task<void> negotiate_tls(const connect_params& p);
     task<void> authenticate(const connect_params& p);
     // Reading one backend message.
     //
@@ -190,6 +194,7 @@ private:
 
     event_loop* loop_;
     tcp_socket sock_;
+    tls_engine tls_;
     recv_buffer buf_;
     std::vector<std::byte> out_;
     message_trace trace_;

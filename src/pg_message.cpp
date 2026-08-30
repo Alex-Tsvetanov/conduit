@@ -65,6 +65,12 @@ std::optional<frame> peek_frame(byte_span in) {
 
 // --- frontend ---------------------------------------------------------------
 
+void encode_ssl_request(std::vector<std::byte>& out) {
+    byte_writer w{out};
+    w.be32(8);
+    w.be32(ssl_request_code);
+}
+
 void encode_startup(std::vector<std::byte>& out, std::string_view user,
                     std::string_view database,
                     const std::vector<std::pair<std::string, std::string>>& options) {

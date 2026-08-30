@@ -3,6 +3,7 @@
 
 #include "../check.hpp"
 #include "conduit/pool.hpp"
+#include "conduit/tls.hpp"
 #include "live.hpp"
 
 using namespace conduit;
@@ -187,4 +188,25 @@ CONDUIT_TEST(pg_live_pool_serves_more_work_than_it_has_connections) {
     CHECK_EQ(done, 6);
     CHECK(pool.size() <= 2);
     loop.block_on(pool.close_all());
+}
+
+CONDUIT_TEST(pg_live_tls_connects_and_runs_a_query) {
+    if (!tls_available()) CONDUIT_SKIP("OpenSSL is not linked");
+    if (!live::pg_up()) CONDUIT_SKIP("no PostgreSQL server reachable");
+    event_loop loop;
+    pg::connection c{loop};
+    auto p = live::pg_params();
+    p.tls.enabled = true;
+    p.tls.verify_peer = false;
+    struct helper {
+        static task<std::string> run(pg::connection& c, pg::connect_params p) {
+            co_await c.open(std::move(p));
+            std::string out = c.tls_active() ? "tls" : "plain";
+            auto r = co_await c.simple_query("SELECT 1");
+            out += r.rows == 1 ? "|ok" : "|no-row";
+            co_await c.close();
+            co_return out;
+        }
+    };
+    CHECK_EQ(loop.block_on(helper::run(c, p)), std::string("tls|ok"));
 }

@@ -4,6 +4,11 @@
 # same server. The ports are shifted away from the defaults so the containers
 # do not collide with a PostgreSQL or MySQL already installed on the machine.
 #
+# PostgreSQL is started with ssl=on and a self-signed test certificate in
+# docker/certs/. The same port still accepts plaintext, so the original
+# integration cases do not have to change. MySQL 8.0 already generates
+# certificates on first start and advertises CLIENT_SSL.
+#
 #   docker compose up -d
 #   ctest --test-dir build -L integration
 #   docker compose down -v
@@ -12,6 +17,10 @@ services:
   postgres:
     image: postgres:16.4
     container_name: conduit_postgres
+    entrypoint: ["/bin/bash", "/usr/local/bin/conduit-postgres-ssl.sh"]
+    volumes:
+      - ./docker/postgres-ssl.sh:/usr/local/bin/conduit-postgres-ssl.sh:ro
+      - ./docker/certs:/certs:ro
     environment:
       POSTGRES_USER: conduit
       POSTGRES_PASSWORD: conduit

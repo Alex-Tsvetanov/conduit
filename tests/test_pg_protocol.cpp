@@ -217,3 +217,13 @@ CONDUIT_TEST(codec_type_satisfies_the_shared_framing_concept) {
     CHECK_EQ(std::string(codec::describe(*f)), std::string("RowDescription"));
     CHECK_EQ(std::string(backend_name('Z')), std::string("ReadyForQuery"));
 }
+
+CONDUIT_TEST(ssl_request_is_eight_bytes_with_the_documented_code) {
+    std::vector<std::byte> out;
+    encode_ssl_request(out);
+    CHECK_EQ(out.size(), std::size_t{8});
+    byte_reader r{byte_span(out)};
+    CHECK_EQ(r.be32(), 8u);
+    CHECK_EQ(r.be32(), ssl_request_code);
+    CHECK(r.empty());
+}

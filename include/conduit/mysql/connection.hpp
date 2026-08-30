@@ -13,6 +13,7 @@
 #include "conduit/mysql/protocol.hpp"
 #include "conduit/net.hpp"
 #include "conduit/row_map.hpp"
+#include "conduit/tls.hpp"
 #include "conduit/trace.hpp"
 
 namespace conduit::mysql {
@@ -30,6 +31,7 @@ struct connect_params {
     std::string user = "root";
     std::string password;
     std::string database;
+    tls_options tls;
 };
 
 struct query_result {
@@ -77,6 +79,7 @@ public:
 
     const std::string& server_version() const noexcept { return server_version_; }
     std::uint32_t connection_id() const noexcept { return connection_id_; }
+    bool tls_active() const noexcept { return tls_.active(); }
     event_loop& loop() noexcept { return *loop_; }
 
 private:
@@ -112,10 +115,12 @@ private:
     void consume(const packet& p) { buf_.consume(p.consumed); }
     task<void> send(std::uint8_t sequence, byte_span payload, const char* name,
                     std::string detail = {});
-    task<void> authenticate(const connect_params& p, const handshake& h);
+    task<void> authenticate(const connect_params& p, const handshake& h,
+                           std::uint8_t response_sequence);
 
     event_loop* loop_;
     tcp_socket sock_;
+    tls_engine tls_;
     recv_buffer buf_;
     std::vector<std::byte> out_;
     message_trace trace_;

@@ -44,7 +44,12 @@ enum class io_status { ok, would_block, closed };
 struct io_result {
     io_status status = io_status::ok;
     std::size_t bytes = 0;
+    // TLS: SSL_read can need the socket writable, and SSL_write can need it
+    // readable. Plaintext I/O leaves this false on a read and true on a write.
+    bool wait_for_write = false;
 };
+
+class tls_engine;
 
 class tcp_socket {
 public:
@@ -238,9 +243,12 @@ inline void event_loop::spawn(task<void> t) { detail::run_spawned(std::move(t));
 // whether that is an error or the expected end of a stream.
 task<bool> read_some(event_loop& loop, tcp_socket& sock, recv_buffer& buf,
                      std::size_t want = 4096);
+task<bool> read_some(event_loop& loop, tcp_socket& sock, tls_engine& tls,
+                     recv_buffer& buf, std::size_t want = 4096);
 
 // Writes the whole span, suspending as often as the kernel makes it wait.
 task<void> write_all(event_loop& loop, tcp_socket& sock, byte_span data);
+task<void> write_all(event_loop& loop, tcp_socket& sock, tls_engine& tls, byte_span data);
 
 // Connects, suspending until the handshake at the TCP level is done.
 task<void> connect(event_loop& loop, tcp_socket& sock, std::string_view host,

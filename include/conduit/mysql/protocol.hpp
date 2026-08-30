@@ -91,6 +91,9 @@ void encode_handshake_response(std::vector<std::byte>& out, std::uint32_t capabi
                                std::string_view user, byte_span auth_response,
                                std::string_view database, std::string_view auth_plugin);
 
+// HandshakeResponse41 truncated before the username. CLIENT_SSL must be set.
+void encode_ssl_request(std::vector<std::byte>& out, std::uint32_t capabilities);
+
 // --- generic server packets ---------------------------------------------------
 
 enum class packet_kind { ok, err, eof, auth_switch, data };

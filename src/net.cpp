@@ -1,4 +1,5 @@
 #include "conduit/net.hpp"
+#include "conduit/tls.hpp"
 
 #include <algorithm>
 #include <cstring>
@@ -200,12 +201,12 @@ io_result tcp_socket::try_write(byte_span from) {
         0);
     if (n > 0) return {io_status::ok, static_cast<std::size_t>(n)};
     int e = last_error();
-    if (is_would_block(e)) return {io_status::would_block, 0};
+    if (is_would_block(e)) return {io_status::would_block, 0, true};
 #ifdef _WIN32
     if (e == WSAECONNRESET || e == WSAECONNABORTED) return {io_status::closed, 0};
 #else
     if (e == ECONNRESET || e == EPIPE) return {io_status::closed, 0};
-    if (e == EINTR) return {io_status::would_block, 0};
+    if (e == EINTR) return {io_status::would_block, 0, true};
 #endif
     throw io_error("send failed, " + errno_text(e));
 }
@@ -449,6 +450,45 @@ task<void> write_all(event_loop& loop, tcp_socket& sock, byte_span data) {
         }
         if (r.status == io_status::closed) throw io_error("peer closed while writing");
         co_await loop.wait_writable(sock.native());
+    }
+    co_return;
+}
+
+task<bool> read_some(event_loop& loop, tcp_socket& sock, tls_engine& tls,
+                     recv_buffer& buf, std::size_t want) {
+    if (!tls.active()) co_return co_await read_some(loop, sock, buf, want);
+    for (;;) {
+        auto dst = buf.writable(want);
+        auto r = tls.try_read(dst);
+        if (r.status == io_status::ok) {
+            buf.committed(r.bytes);
+            co_return true;
+        }
+        if (r.status == io_status::closed) co_return false;
+        if (r.wait_for_write)
+            co_await loop.wait_writable(sock.native());
+        else
+            co_await loop.wait_readable(sock.native());
+    }
+}
+
+task<void> write_all(event_loop& loop, tcp_socket& sock, tls_engine& tls, byte_span data) {
+    if (!tls.active()) {
+        co_await write_all(loop, sock, data);
+        co_return;
+    }
+    std::size_t sent = 0;
+    while (sent < data.size()) {
+        auto r = tls.try_write(data.subspan(sent));
+        if (r.status == io_status::ok) {
+            sent += r.bytes;
+            continue;
+        }
+        if (r.status == io_status::closed) throw io_error("peer closed while writing");
+        if (r.wait_for_write)
+            co_await loop.wait_writable(sock.native());
+        else
+            co_await loop.wait_readable(sock.native());
     }
     co_return;
 }

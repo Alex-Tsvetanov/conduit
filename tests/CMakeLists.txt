@@ -3,6 +3,7 @@ add_executable(conduit_tests
     test_bytes.cpp
     test_crypto.cpp
     test_loop.cpp
+    test_tls.cpp
     test_pg_protocol.cpp
     test_mysql_protocol.cpp
     test_types.cpp

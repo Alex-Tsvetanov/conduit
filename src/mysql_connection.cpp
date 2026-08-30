@@ -10,7 +10,7 @@ task<packet> connection::read_packet_slow() {
     for (;;) {
         auto p = peek_packet(buf_.readable());
         if (p) co_return *p;
-        bool alive = co_await read_some(*loop_, sock_, buf_);
+        bool alive = co_await read_some(*loop_, sock_, tls_, buf_);
         if (!alive) {
             poisoned_ = true;
             throw io_error("MySQL server closed the connection");
@@ -23,12 +23,15 @@ task<void> connection::send(std::uint8_t sequence, byte_span payload, const char
     out_.clear();
     write_packet(out_, sequence, payload);
     trace_.record(direction::to_server, name, out_.size(), std::move(detail));
-    co_await write_all(*loop_, sock_, byte_span(out_));
+    co_await write_all(*loop_, sock_, tls_, byte_span(out_));
     out_.clear();
     trace_.count_round_trip();
 }
 
 task<void> connection::open(connect_params p) {
+    if (p.tls.enabled && !tls_available())
+        throw io_error(
+            "TLS was requested but this build of Conduit was not linked against OpenSSL");
     co_await connect(*loop_, sock_, p.host, p.port);
 
     auto first = co_await read_packet();
@@ -40,21 +43,44 @@ task<void> connection::open(connect_params p) {
     std::uint8_t seq = first.sequence;
     consume(first);
 
-    co_await authenticate(p, h);
-    (void)seq;
+    std::uint8_t response_seq = static_cast<std::uint8_t>(seq + 1);
+    if (p.tls.enabled) {
+        if (!(h.capabilities & caps::ssl))
+            throw io_error("MySQL server did not offer TLS");
+        if (buf_.readable_size() != 0)
+            throw protocol_error("unexpected bytes after the handshake before TLS");
+
+        std::uint32_t ssl_caps = caps::protocol_41 | caps::secure_connection | caps::plugin_auth |
+                                 caps::transactions | caps::long_password | caps::long_flag |
+                                 caps::multi_results | caps::ssl;
+        if (!p.database.empty()) ssl_caps |= caps::connect_with_db;
+        ssl_caps &= h.capabilities | caps::long_password | caps::ssl;
+        ssl_caps |= caps::ssl;
+
+        std::vector<std::byte> ssl_req;
+        encode_ssl_request(ssl_req, ssl_caps);
+        co_await send(response_seq, byte_span(ssl_req), "SSLRequest");
+        co_await handshake_tls(*loop_, sock_, tls_, p.tls, p.host);
+        response_seq = static_cast<std::uint8_t>(seq + 2);
+    }
+
+    co_await authenticate(p, h, response_seq);
     open_ = true;
     poisoned_ = false;
 }
 
-task<void> connection::authenticate(const connect_params& p, const handshake& h) {
+task<void> connection::authenticate(const connect_params& p, const handshake& h,
+                                   std::uint8_t response_sequence) {
     std::uint32_t want = caps::protocol_41 | caps::secure_connection | caps::plugin_auth |
                          caps::transactions | caps::long_password | caps::long_flag |
                          caps::multi_results;
     if (!p.database.empty()) want |= caps::connect_with_db;
-    // Only ask for what the server offers, and never for TLS: this client does
-    // not implement it, and claiming the capability would break the handshake.
-    capabilities_ = want & (h.capabilities | caps::long_password);
-    capabilities_ &= ~caps::ssl;
+    if (tls_.active()) want |= caps::ssl;
+    capabilities_ = want & (h.capabilities | caps::long_password | (tls_.active() ? caps::ssl : 0));
+    if (tls_.active())
+        capabilities_ |= caps::ssl;
+    else
+        capabilities_ &= ~caps::ssl;
 
     if (!h.auth_plugin.empty() && h.auth_plugin != "mysql_native_password")
         throw protocol_error("server asked for authentication plugin '" + h.auth_plugin +
@@ -66,7 +92,7 @@ task<void> connection::authenticate(const connect_params& p, const handshake& h)
     std::vector<std::byte> payload;
     encode_handshake_response(payload, capabilities_, p.user, reply_span, p.database,
                               "mysql_native_password");
-    co_await send(1, byte_span(payload), "HandshakeResponse41",
+    co_await send(response_sequence, byte_span(payload), "HandshakeResponse41",
                   "user=" + p.user + " database=" + p.database);
 
     for (;;) {
@@ -215,12 +241,13 @@ task<void> connection::close() {
             out_.clear();
             write_packet(out_, 0, byte_span(payload));
             trace_.record(direction::to_server, "COM_QUIT", out_.size());
-            co_await write_all(*loop_, sock_, byte_span(out_));
+            co_await write_all(*loop_, sock_, tls_, byte_span(out_));
             out_.clear();
         } catch (const io_error&) {
             // The peer may already be gone.
         }
     }
+    tls_.close();
     sock_.close();
     open_ = false;
     co_return;
