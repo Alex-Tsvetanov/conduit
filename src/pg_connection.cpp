@@ -22,7 +22,7 @@ task<frame> connection::read_message_slow() {
         if (f) co_return *f;
         // Nothing whole in the buffer yet. This is the resumable path: a partial
         // message costs one more read, never a lost byte.
-        bool alive = co_await read_some(*loop_, sock_, buf_);
+        bool alive = co_await read_some(*loop_, sock_, tls_, buf_);
         if (!alive) {
             poisoned_ = true;
             throw io_error("PostgreSQL server closed the connection");
@@ -32,17 +32,55 @@ task<frame> connection::read_message_slow() {
 
 task<void> connection::flush() {
     if (out_.empty()) co_return;
-    co_await write_all(*loop_, sock_, byte_span(out_));
+    co_await write_all(*loop_, sock_, tls_, byte_span(out_));
     out_.clear();
     trace_.count_round_trip();
 }
 
 task<void> connection::open(connect_params p) {
     statements_ = lru_cache<prepared_statement>(p.statement_cache_size);
+    if (p.tls.enabled && !tls_available())
+        throw io_error(
+            "TLS was requested but this build of Conduit was not linked against OpenSSL");
     co_await connect(*loop_, sock_, p.host, p.port);
+    if (p.tls.enabled) co_await negotiate_tls(p);
     co_await authenticate(p);
     open_ = true;
     poisoned_ = false;
+}
+
+task<void> connection::negotiate_tls(const connect_params& p) {
+    out_.clear();
+    encode_ssl_request(out_);
+    trace_.record(direction::to_server, "SSLRequest", out_.size());
+    co_await write_all(*loop_, sock_, byte_span(out_));
+    out_.clear();
+    trace_.count_round_trip();
+
+    // Exactly one byte: 'S' or 'N'. Reading more would swallow the start of
+    // the TLS records if they arrived in the same TCP segment, and those bytes
+    // would then be invisible to OpenSSL.
+    std::byte reply{};
+    for (;;) {
+        auto r = sock_.try_read(std::span<std::byte>(&reply, 1));
+        if (r.status == io_status::ok && r.bytes == 1) break;
+        if (r.status == io_status::closed) {
+            poisoned_ = true;
+            throw io_error("PostgreSQL server closed during TLS negotiation");
+        }
+        co_await loop_->wait_readable(sock_.native());
+    }
+    char c = static_cast<char>(std::to_integer<std::uint8_t>(reply));
+    if (c != 'S') {
+        sock_.close();
+        poisoned_ = true;
+        // An ErrorResponse here is not authenticated (CVE-2024-10977). Do
+        // not surface its text; the connection is already closed.
+        if (c == 'N') throw io_error("PostgreSQL server refused TLS");
+        throw io_error("PostgreSQL server rejected the TLS request");
+    }
+    trace_.record(direction::from_server, "SSLResponse", 1, "S");
+    co_await handshake_tls(*loop_, sock_, tls_, p.tls, p.host);
 }
 
 task<void> connection::authenticate(const connect_params& p) {
@@ -384,12 +422,13 @@ task<void> connection::close() {
             out_.clear();
             encode_terminate(out_);
             trace_.record(direction::to_server, "Terminate", out_.size());
-            co_await write_all(*loop_, sock_, byte_span(out_));
+            co_await write_all(*loop_, sock_, tls_, byte_span(out_));
             out_.clear();
         } catch (const io_error&) {
             // The peer may already be gone. Closing is still the right move.
         }
     }
+    tls_.close();
     sock_.close();
     open_ = false;
     co_return;

@@ -33,8 +33,9 @@ authentication exchanges need are all in this repository.
 | Prepared statement cache: per connection, LRU, close on eviction, retry on 26000 | done |
 | Typed row mapping with compile time field binding | done |
 | Protocol message trace and round trip counting | done |
-| Integration tests against real servers via Docker Compose | done, 12 cases |
-| TLS, `COPY`, `LISTEN`/`NOTIFY`, MySQL binary prepared statements, `caching_sha2_password` | out of scope, reported with a clear error |
+| TLS: PostgreSQL `SSLRequest`, MySQL `CLIENT_SSL` / `SSLRequest` | done, optional system OpenSSL |
+| Integration tests against real servers via Docker Compose | done, 14 cases |
+| `COPY`, `LISTEN`/`NOTIFY`, MySQL binary prepared statements, `caching_sha2_password` | out of scope, reported with a clear error |
 
 ## Technologies
 
@@ -47,6 +48,7 @@ authentication exchanges need are all in this repository.
 | MySQL client/server protocol | `Protocol::HandshakeV10` | The second protocol implemented directly, publicly specified |
 | Docker Compose | v2 | Pins server versions so integration tests and measurements are reproducible |
 | `libpq` | optional, system package | Baseline for the benchmark only. Found with `find_package(... QUIET)`; the benchmark reports its absence and measures nothing rather than guessing |
+| OpenSSL | optional, system package | TLS for both wire protocols. Found with `find_package(OpenSSL QUIET)`; if it is absent the library builds without TLS, requesting TLS is a clear error, and the tests skip rather than guessing |
 
 The test runner is `tests/check.hpp`, 170 lines, registered with CTest through `add_test`.
 There is no GoogleTest and no Google Benchmark: a build that needs a package manager is a build
@@ -70,7 +72,7 @@ flowchart TD
     Pool --> MY[MySQL codec]
     PG --> Dec[Zero copy row decoder]
     MY --> Dec
-    PG --> Tr[Transport<br/>socket, buffers, event loop]
+    PG --> Tr[Transport<br/>socket, TLS, buffers, event loop]
     MY --> Tr
     Dec -. views into .-> Tr
     Tr --> Net[(Database server)]
@@ -90,14 +92,15 @@ cmake --build build
 ## Test
 
 ```bash
-# 85 unit cases, no server needed
+# unit cases, no server needed
 ctest --test-dir build -L unit
 
-# 12 integration cases against real servers
+# integration cases against real servers, including TLS
 docker compose up -d
 ctest --test-dir build -L integration
 
-# everything; the integration binary skips and still exits zero when no server is up
+# everything; the integration binary skips and still exits zero when no server is up.
+# TLS cases skip when OpenSSL was not found at configure time, and say so.
 ctest --test-dir build --output-on-failure
 ```
 
@@ -158,6 +161,10 @@ says so explicitly when it is not.
 Every number in the report was produced by this program on the machine described in the report;
 nothing is estimated.
 
+`benchmarks/results/` is not in this tree: Docker was not available in the environment that
+added TLS, so the harness was not run again. The numbers already in the report are the ones
+from the earlier measured runs. They were not invented and they were not rewritten.
+
 ## Documentation
 
 The project report lives in `docs/` and is written in Bulgarian, because the subject is taught in
@@ -193,8 +200,8 @@ grep -rn 'TODO' docs/chapters docs/Main.tex docs/references.bib
 - [x] Prepared statement cache with eviction and invalidation
 - [x] Typed mapping layer with compile time field binding
 - [x] Docker Compose environment, PostgreSQL 16.4 and MySQL 8.0.39
-- [x] Unit tests, 85 cases
-- [x] Integration tests against both servers, 12 cases
+- [x] Unit tests, 91 cases
+- [x] Integration tests against both servers, 14 cases
 - [x] Benchmark harness
 - [x] Results chapter filled in with measured numbers
 - [x] Comparison against `libpq` and `libmysqlclient`: measured. Not on the Windows machine the
@@ -219,7 +226,10 @@ grep -rn 'TODO' docs/chapters docs/Main.tex docs/references.bib
       Verified: GCC 12.2 Release completes where it used to crash, GCC 14.2 completes, the host
       MinGW build completes with `ctest` 2 of 2 green, and ASan reports no error (it needs a 128 MB
       stack to finish, because the sanitizer's own frame instrumentation overflows the default 8 MB).
-- [ ] TLS
+- [x] TLS, via system OpenSSL (`find_package(OpenSSL QUIET)`). A build without it still compiles;
+      requesting TLS is a clear error, and the tests skip rather than guessing. GitHub Actions
+      runs the unit job always; integration and live TLS only on the job that starts the
+      compose servers.
 
 ## License
 

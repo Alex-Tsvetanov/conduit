@@ -15,6 +15,7 @@ add_library(conduit
     src/bytes.cpp
     src/crypto.cpp
     src/net.cpp
+    src/tls.cpp
     src/trace.cpp
     src/value.cpp
     src/scram.cpp
@@ -44,6 +45,18 @@ if(WIN32)
 endif()
 find_package(Threads REQUIRED)
 target_link_libraries(conduit PUBLIC Threads::Threads)
+
+# --- optional TLS: system OpenSSL, same rule as libpq --------------------
+# The library builds without it. Requesting TLS then is a clear error, and
+# the tests skip rather than guess. Nothing is fetched at configure time.
+find_package(OpenSSL QUIET)
+if(OpenSSL_FOUND)
+    message(STATUS "conduit: OpenSSL found (${OPENSSL_VERSION}), TLS will be compiled in")
+    target_link_libraries(conduit PUBLIC OpenSSL::SSL)
+    target_compile_definitions(conduit PUBLIC CONDUIT_HAS_OPENSSL=1)
+else()
+    message(STATUS "conduit: OpenSSL not found, TLS is not compiled in; tests that need it skip")
+endif()
 
 # --- optional baseline: libpq, only if it is already on the machine ----------
 # The library never depends on it. It is used solely by the benchmark for a

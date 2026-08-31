@@ -145,6 +145,14 @@ void encode_handshake_response(std::vector<std::byte>& out, std::uint32_t capabi
     if (capabilities & caps::plugin_auth) w.cstr(auth_plugin);
 }
 
+void encode_ssl_request(std::vector<std::byte>& out, std::uint32_t capabilities) {
+    byte_writer w{out};
+    w.le32(capabilities | caps::ssl);
+    w.le32(static_cast<std::uint32_t>(max_payload));
+    w.u8(45);
+    for (int i = 0; i < 23; ++i) w.u8(0);
+}
+
 // --- generic packets ----------------------------------------------------------
 
 packet_kind classify(byte_span payload) {

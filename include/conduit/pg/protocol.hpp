@@ -81,6 +81,11 @@ struct codec {
 
 // --- frontend messages ------------------------------------------------------
 
+// SSLRequest: length 8, code 80877103. Sent instead of StartupMessage. The
+// server replies with a single byte, not a framed message: 'S' or 'N'.
+inline constexpr std::uint32_t ssl_request_code = 80877103;
+void encode_ssl_request(std::vector<std::byte>& out);
+
 void encode_startup(std::vector<std::byte>& out, std::string_view user,
                     std::string_view database,
                     const std::vector<std::pair<std::string, std::string>>& options = {});
